@@ -102,16 +102,12 @@ class GeminiRepository {
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     val currentLine = line!!.trim()
-                    if (currentLine.isNotBlank() && currentLine.startsWith("{") || currentLine.startsWith("\"")) {
+                    if (currentLine.startsWith("data: ")) {
+                        val jsonLine = currentLine.removePrefix("data: ").trim()
+                        if (jsonLine.isBlank() || jsonLine == "[DONE]") continue
+                        
                         try {
-                            val jsonLine = if (currentLine.startsWith("data: ")) currentLine.removePrefix("data: ") else currentLine
-                            if (jsonLine.startsWith("[")) continue
-                            if (jsonLine.startsWith("]")) continue
-                            if (jsonLine.endsWith(",")) jsonLine.dropLast(1)
-                            
-                            val cleanLine = jsonLine.removeSuffix(",")
-
-                            val chunk = JSONObject(cleanLine)
+                            val chunk = JSONObject(jsonLine)
                             if (chunk.has("candidates")) {
                                 val candidates = chunk.getJSONArray("candidates")
                                 if (candidates.length() > 0) {
@@ -127,7 +123,7 @@ class GeminiRepository {
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.e("GeminiRepository", "Ошибка парсинга чанка: ${e.message} \n Строка: $currentLine")
+                            Log.e("GeminiRepository", "Ошибка парсинга чанка: ${e.message} \n Строка: $jsonLine")
                         }
                     }
                 }

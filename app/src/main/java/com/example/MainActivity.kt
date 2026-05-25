@@ -17,7 +17,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -188,7 +190,9 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                                   speakerState = SpeakerState.THINKING
                                   statusText = "Генерирую ответ: $command"
                                   val flow = repo.generateStoryStream(command, userProfile)
-                                  bm.processStream(flow)
+                                  bm.processStream(flow) { text ->
+                                      statusText = text
+                                  }
                                   speakerState = SpeakerState.SPEAKING
                                   proactiveTimer.resetTimer()
                               }
@@ -257,7 +261,9 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                   statusText = "Проявляю инициативу..."
                   val flow = repository?.generateStoryStream(prompt, userProfile)
                   if (flow != null) {
-                      bufferManager?.processStream(flow)
+                      bufferManager?.processStream(flow) { text ->
+                          statusText = text
+                      }
                   }
                   speakerState = SpeakerState.SPEAKING
                   proactiveTimer.resetTimer()
@@ -319,13 +325,15 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                   geminiApiKey = userProfile.geminiApiKey
               )
               
-              Text(
-                text = statusText,
-                color = Color.White,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 32.dp)
-              )
+              Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                  Text(
+                    text = statusText,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                  )
+              }
               
               Spacer(modifier = Modifier.padding(top = 16.dp))
               
@@ -344,7 +352,9 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                                       speakerState = SpeakerState.THINKING
                                       statusText = "Запрос: $textInput"
                                       val flow = repository?.generateStoryStream(textInput, userProfile)
-                                      if (flow != null) bufferManager?.processStream(flow)
+                                      if (flow != null) bufferManager?.processStream(flow) { text ->
+                                          statusText = text
+                                      }
                                       speakerState = SpeakerState.SPEAKING
                                       textInput = ""
                                       proactiveTimer.resetTimer()

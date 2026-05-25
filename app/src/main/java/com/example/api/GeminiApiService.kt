@@ -7,7 +7,7 @@ import retrofit2.http.Query
 import retrofit2.http.Streaming
 
 interface GeminiApiService {
-    @POST("v1beta/models/gemini-3.5-flash:streamGenerateContent")
+    @POST("v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse")
     @Streaming
     suspend fun generateContentStream(
         @Query("key") apiKey: String,

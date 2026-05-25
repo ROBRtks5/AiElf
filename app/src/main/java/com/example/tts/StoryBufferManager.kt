@@ -14,13 +14,14 @@ class StoryBufferManager(private val voiceManager: VoiceManager) {
     private var storyJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main)
 
-    fun processStream(textFlow: Flow<String>) {
+    fun processStream(textFlow: Flow<String>, onTextUpdate: ((String) -> Unit)? = null) {
         // Прерываем предыдущее чтение
         stop()
         
         storyJob = scope.launch {
             var buffer = StringBuilder()
             var isFirstSentence = true
+            var fullTextSoFar = ""
 
             textFlow
                 .catch { e -> Log.e("StoryBuffer", "Ошибка стрима: ${e.message}") }
@@ -32,6 +33,8 @@ class StoryBufferManager(private val voiceManager: VoiceManager) {
                 }
                 .collect { chunk ->
                     buffer.append(chunk)
+                    fullTextSoFar += chunk
+                    onTextUpdate?.invoke(fullTextSoFar)
 
                     // Пытаемся найти законченные предложения
                     // Регулярное выражение ищет символы конца предложения (точка, восклицание, вопрос).
