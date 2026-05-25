@@ -19,12 +19,14 @@ class WakeWordListener(
     private var speechRecognizer: SpeechRecognizer? = null
     private var isListening = false
     private var isCommandMode = false
-    private val wakeWord = "эй малышка"
+    private val wakeWords = listOf("малышка", "малыш", "детка", "эй", "проснись", "компьютер", "привет", "слушай")
 
     fun startListening(): Boolean {
         if (isListening) return true
         
         try {
+            // Обязательно высвобождаем старый рекогнайзер перед созданием нового
+            speechRecognizer?.destroy()
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
@@ -76,9 +78,10 @@ class WakeWordListener(
                             isCommandMode = false
                         } else {
                             // Ожидаем фразу активации
-                            if (bestMatch.contains(wakeWord)) {
+                            val triggeredWakeWord = wakeWords.firstOrNull { bestMatch.contains(it) }
+                            if (triggeredWakeWord != null) {
                                 onWakeWordDetected()
-                                val command = bestMatch.substringAfter(wakeWord).trim()
+                                val command = bestMatch.substringAfter(triggeredWakeWord).trim()
                                 if (command.isNotEmpty()) {
                                     onCommandDetected(command)
                                 } else {

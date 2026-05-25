@@ -322,39 +322,47 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                 modifier = Modifier.padding(top = 32.dp)
               )
               
-              if (!isMicWorking) {
-                  OutlinedTextField(
-                      value = textInput,
-                      onValueChange = { textInput = it },
-                      placeholder = { Text("Введите команду...") },
-                      modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                      trailingIcon = {
-                          IconButton(onClick = {
-                              if (textInput.isNotBlank()) {
-                                  scope.launch {
-                                      try {
-                                          speakerState = SpeakerState.THINKING
-                                          statusText = "Запрос: $textInput"
-                                          val flow = repository?.generateStoryStream(textInput, userProfile)
-                                          if (flow != null) bufferManager?.processStream(flow)
-                                          speakerState = SpeakerState.SPEAKING
-                                          textInput = ""
-                                      } catch(e: Exception) {
-                                          statusText = "Ошибка: ${e.message}"
-                                          speakerState = SpeakerState.ERROR
-                                      }
+              Spacer(modifier = Modifier.padding(top = 16.dp))
+              
+              OutlinedTextField(
+                  value = textInput,
+                  onValueChange = { textInput = it },
+                  placeholder = { Text("Введи команду или позови «эй малыш»...") },
+                  modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                  trailingIcon = {
+                      IconButton(onClick = {
+                          if (textInput.isNotBlank()) {
+                              scope.launch {
+                                  try {
+                                      proactiveTimer.stopTimer()
+                                      bufferManager?.stop()
+                                      speakerState = SpeakerState.THINKING
+                                      statusText = "Запрос: $textInput"
+                                      val flow = repository?.generateStoryStream(textInput, userProfile)
+                                      if (flow != null) bufferManager?.processStream(flow)
+                                      speakerState = SpeakerState.SPEAKING
+                                      textInput = ""
+                                      proactiveTimer.resetTimer()
+                                  } catch(e: Exception) {
+                                      statusText = "Ошибка: ${e.message}"
+                                      speakerState = SpeakerState.ERROR
+                                      proactiveTimer.resetTimer()
                                   }
                               }
-                          }) {
-                              Icon(Icons.AutoMirrored.Filled.Send, "Отправить", tint = Color.White)
                           }
-                      },
-                      colors = OutlinedTextFieldDefaults.colors(
-                          focusedTextColor = Color.White,
-                          unfocusedTextColor = Color.White,
-                      )
+                      }) {
+                          Icon(Icons.AutoMirrored.Filled.Send, "Отправить", tint = Color.White)
+                      }
+                  },
+                  colors = OutlinedTextFieldDefaults.colors(
+                      focusedTextColor = Color.White,
+                      unfocusedTextColor = Color.White,
+                      focusedBorderColor = Color(0xFF9C27B0),
+                      unfocusedBorderColor = Color.White.copy(alpha = 0.4f),
+                      focusedLabelColor = Color(0xFF9C27B0),
+                      unfocusedLabelColor = Color.White.copy(alpha = 0.6f)
                   )
-              }
+              )
           }
       } else {
           // Экран до старта (ожидаем клика для активации движка)

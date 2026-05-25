@@ -79,29 +79,34 @@ class VoiceManager(private val context: Context, private val onInitCompleted: (B
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val result = tts?.setLanguage(Locale("ru", "RU"))
+            var result = tts?.setLanguage(Locale("ru", "RU"))
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e("VoiceManager", "Язык не поддерживается или отсутствуют голосовые данные")
-                onInitCompleted(false)
-            } else {
-                tts?.setPitch(1.3f)
-                tts?.setSpeechRate(1.1f)
-                
-                tts?.setOnUtteranceProgressListener(object: UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        Log.d("VoiceManager", "Начали говорить")
-                    }
-                    override fun onDone(utteranceId: String?) {
-                        Log.d("VoiceManager", "Закончили говорить")
-                    }
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        Log.e("VoiceManager", "Ошибка TTS")
-                    }
-                })
-                
-                onInitCompleted(true)
+                Log.w("VoiceManager", "Русский язык TTS не поддерживается, пробуем системный по умолчанию...")
+                result = tts?.setLanguage(Locale.getDefault())
             }
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.w("VoiceManager", "Системный язык не поддерживается, пробуем английский язык...")
+                result = tts?.setLanguage(Locale.US)
+            }
+            
+            tts?.setPitch(1.3f)
+            tts?.setSpeechRate(1.1f)
+            
+            tts?.setOnUtteranceProgressListener(object: UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    Log.d("VoiceManager", "Начали говорить")
+                }
+                override fun onDone(utteranceId: String?) {
+                    Log.d("VoiceManager", "Закончили говорить")
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    Log.e("VoiceManager", "Ошибка TTS")
+                }
+            })
+            
+            // Запуск инициализации считаем успешным в любом случае, чтобы не виснуть
+            onInitCompleted(true)
         } else {
             Log.e("VoiceManager", "Ошибка инициализации TTS")
             onInitCompleted(false)
