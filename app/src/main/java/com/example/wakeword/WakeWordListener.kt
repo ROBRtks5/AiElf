@@ -21,17 +21,19 @@ class WakeWordListener(
     private var isCommandMode = false
     private val wakeWords = listOf("малышка", "малыш", "детка", "эй", "проснись", "компьютер", "привет", "слушай")
 
+    // Добавим callback для отладки
+    var onDebugText: ((String) -> Unit)? = null
+
     fun startListening(): Boolean {
         if (isListening) return true
         
         try {
-            // Обязательно высвобождаем старый рекогнайзер перед созданием нового
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        onStateChanged(SpeakerState.LISTENING)
-                    }
+            if (speechRecognizer == null) {
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                    setRecognitionListener(object : RecognitionListener {
+                        override fun onReadyForSpeech(params: Bundle?) {
+                            onStateChanged(SpeakerState.LISTENING)
+                        }
                     
                     override fun onBeginningOfSpeech() {}
                     
@@ -51,8 +53,12 @@ class WakeWordListener(
                     }
                     
                     override fun onError(error: Int) {
-                        Log.e("WakeWordListener", "Ошибка: ${getErrorMessage(error)}, перезапускаем прослушивание")
+                        val msg = getErrorMessage(error)
+                        Log.e("WakeWordListener", "Ошибка: $msg, перезапускаем прослушивание")
+                        onDebugText?.invoke("Ошибка микрофона: $msg")
                         isListening = false
+                        // НЕ СБРАСЫВАЕМ isCommandMode при некоторых ошибках молчания, но
+                        // для надежности оставим как есть, только дадим UI знать об ошибке
                         isCommandMode = false
                         
                         if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
@@ -69,53 +75,62 @@ class WakeWordListener(
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         val bestMatch = matches?.firstOrNull()?.lowercase(Locale.getDefault()) ?: ""
                         Log.d("WakeWordListener", "Услышано: $bestMatch")
+                        onDebugText?.invoke("Услышал: $bestMatch")
                         
+                        var handledAsCommand = false
+
                         if (isCommandMode) {
-                            // Мы в режиме приема основной команды
                             if (bestMatch.isNotBlank()) {
+                                isCommandMode = false
+                                handledAsCommand = true
                                 onCommandDetected(bestMatch)
+                            } else {
+                                onDebugText?.invoke("Не расслышала команду, повторите...")
                             }
-                            isCommandMode = false
                         } else {
-                            // Ожидаем фразу активации
                             val triggeredWakeWord = wakeWords.firstOrNull { bestMatch.contains(it) }
                             if (triggeredWakeWord != null) {
                                 onWakeWordDetected()
                                 val command = bestMatch.substringAfter(triggeredWakeWord).trim()
                                 if (command.isNotEmpty()) {
+                                    handledAsCommand = true
                                     onCommandDetected(command)
                                 } else {
-                                    // Переходим в режим слушания команды
                                     isCommandMode = true
-                                    isListening = false
-                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                        startListening()
-                                    }, 100)
-                                    return
+                                    onDebugText?.invoke("Активирована! Жду команду...")
                                 }
                             }
                         }
                         
-                        if (!isCommandMode) {
-                            isListening = false
+                        if (!isCommandMode && !handledAsCommand) {
                             onStateChanged(SpeakerState.IDLE)
-                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                startListening()
-                            }, 500)
                         }
+                        
+                        isListening = false
+                        // Перезапуск слушателя для непрерывного процесса
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            startListening()
+                        }, 500)
                     }
 
-                    override fun onPartialResults(partialResults: Bundle?) {}
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val bestMatch = matches?.firstOrNull()?.lowercase(Locale.getDefault()) ?: ""
+                        if (bestMatch.isNotBlank()) {
+                            onDebugText?.invoke("Слушаю: $bestMatch...")
+                        }
+                    }
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
+                }
             }
 
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU") // Прямо просим русский
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true) // Включаем partial results!
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
             }
 
             speechRecognizer?.startListening(intent)

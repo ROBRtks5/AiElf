@@ -171,7 +171,7 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                           bm.stop()
                           speakerState = SpeakerState.SPEAKING
                           vm.speak("Слушаю, ${userProfile.name}", flush = true)
-                          statusText = "Активирована! Слушаю..."
+                          statusText = "Активирована! Жду команду..."
                       }
                   },
                   onCommandDetected = { command ->
@@ -214,6 +214,11 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                       }
                   }
               )
+              
+              wwl.onDebugText = { debugMsg ->
+                  statusText = debugMsg
+              }
+              
               wakeWordListener = wwl
               
               // Запуск слушателя
