@@ -90,8 +90,7 @@ class GeminiRepository {
         val requestParams = GenerateContentRequest(
             contents = chatHistory.toList(),
             systemInstruction = Content(parts = listOf(Part(text = dynamicSystemPrompt))),
-            generationConfig = GenerationConfig(temperature = 0.8f),
-            tools = apiTools
+            generationConfig = GenerationConfig(temperature = 0.8f)
         )
 
         val fullResponseBuffer = java.lang.StringBuilder()

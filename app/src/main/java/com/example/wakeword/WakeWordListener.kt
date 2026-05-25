@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
@@ -46,19 +47,25 @@ class WakeWordListener(
         }
 
         try {
-            // Принудительно задействуем оригинальный Google Speech Recognition сервис для обхода проблем кастомных прошивок (Xiaomi MIUI/HyperOS, etc.)
-            try {
-                val googleComponent = android.content.ComponentName(
-                    "com.google.android.googlequicksearchbox",
-                    "com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
-                )
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext, googleComponent)
-                Log.d("WakeWordListener", "Успешно привязан к Google Speech Service")
-            } catch (e: Exception) {
-                Log.e("WakeWordListener", "Google Speech Service недоступен. Использование системного дефолта: ${e.message}")
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+            // Ищем Google Speech Recognition сервис (приоритет для оффлайн пакетов)
+            val googleComponent = android.content.ComponentName(
+                "com.google.android.googlequicksearchbox",
+                "com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
+            )
+            
+            // Проверяем, существует ли этот сервис в системе
+            val serviceIntent = Intent(RecognitionService.SERVICE_INTERFACE)
+            serviceIntent.component = googleComponent
+            val resolveInfo = context.packageManager.resolveService(serviceIntent, 0)
+            
+            speechRecognizer = if (resolveInfo != null) {
+                Log.d("WakeWordListener", "Используем Google Speech Recognizer напрямую")
+                SpeechRecognizer.createSpeechRecognizer(context.applicationContext, googleComponent)
+            } else {
+                Log.w("WakeWordListener", "Google Speech Recognizer не найден, используем системный")
+                SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
             }
-
+            
             speechRecognizer?.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     onStateChanged(SpeakerState.LISTENING)
@@ -158,6 +165,10 @@ class WakeWordListener(
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU")
                 putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, "ru-RU")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                // Обязательно указываем использовать оффлайн-модель, если она скачана
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                }
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
             }
