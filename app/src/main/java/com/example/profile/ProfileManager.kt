@@ -17,7 +17,9 @@ data class UserProfile(
     val location: String,
     val job: String,
     val hobbies: String,
-    val regimen: String
+    val regimen: String,
+    val geminiApiKey: String,
+    val elevenLabsApiKey: String
 )
 
 class ProfileManager(private val context: Context) {
@@ -28,6 +30,8 @@ class ProfileManager(private val context: Context) {
         val JOB = stringPreferencesKey("job")
         val HOBBIES = stringPreferencesKey("hobbies")
         val REGIMEN = stringPreferencesKey("regimen")
+        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val ELEVEN_LABS_API_KEY = stringPreferencesKey("eleven_labs_api_key")
     }
 
     val userProfileFlow: Flow<UserProfile> = context.dataStore.data
@@ -38,7 +42,9 @@ class ProfileManager(private val context: Context) {
                 location = preferences[LOCATION] ?: "Россия, Ростовская область, город Гуково",
                 job = preferences[JOB] ?: "Банк, поддержка первой линии в отделе инвестиций, удаленка.",
                 hobbies = preferences[HOBBIES] ?: "Эндуро и стрит на велосипеде (Rocky Mountain Altitude), трейдинг (ОФЗ, фьючерс S1M6), генерация в Suno AI, изучение SQL.",
-                regimen = preferences[REGIMEN] ?: "Протокол «Монолит» (тренировки, диета с цельными яйцами)."
+                regimen = preferences[REGIMEN] ?: "Протокол «Монолит» (тренировки, диета с цельными яйцами).",
+                geminiApiKey = preferences[GEMINI_API_KEY] ?: com.example.BuildConfig.GEMINI_API_KEY,
+                elevenLabsApiKey = preferences[ELEVEN_LABS_API_KEY] ?: ""
             )
         }
 
@@ -50,6 +56,8 @@ class ProfileManager(private val context: Context) {
             preferences[JOB] = profile.job
             preferences[HOBBIES] = profile.hobbies
             preferences[REGIMEN] = profile.regimen
+            preferences[GEMINI_API_KEY] = profile.geminiApiKey
+            preferences[ELEVEN_LABS_API_KEY] = profile.elevenLabsApiKey
         }
     }
 }

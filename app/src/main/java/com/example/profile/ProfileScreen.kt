@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -19,7 +19,7 @@ fun ProfileScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val userProfile by profileManager.userProfileFlow.collectAsState(
-        initial = UserProfile("", "", "", "", "", "")
+        initial = UserProfile("", "", "", "", "", "", "", "")
     )
 
     var name by remember(userProfile.name) { mutableStateOf(userProfile.name) }
@@ -28,6 +28,8 @@ fun ProfileScreen(
     var job by remember(userProfile.job) { mutableStateOf(userProfile.job) }
     var hobbies by remember(userProfile.hobbies) { mutableStateOf(userProfile.hobbies) }
     var regimen by remember(userProfile.regimen) { mutableStateOf(userProfile.regimen) }
+    var geminiApiKey by remember(userProfile.geminiApiKey) { mutableStateOf(userProfile.geminiApiKey) }
+    var elevenLabsApiKey by remember(userProfile.elevenLabsApiKey) { mutableStateOf(userProfile.elevenLabsApiKey) }
 
     Scaffold(
         topBar = {
@@ -35,7 +37,7 @@ fun ProfileScreen(
                 title = { Text("Профиль Хозяина") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 }
             )
@@ -86,11 +88,27 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("API Ключи (Интеграции)", style = MaterialTheme.typography.titleMedium)
+
+            OutlinedTextField(
+                value = geminiApiKey,
+                onValueChange = { geminiApiKey = it },
+                label = { Text("Gemini API Key") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = elevenLabsApiKey,
+                onValueChange = { elevenLabsApiKey = it },
+                label = { Text("ElevenLabs API Key") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
             Button(
                 onClick = {
                     coroutineScope.launch {
                         profileManager.saveProfile(
-                            UserProfile(name, age, location, job, hobbies, regimen)
+                            UserProfile(name, age, location, job, hobbies, regimen, geminiApiKey, elevenLabsApiKey)
                         )
                         onBack()
                     }

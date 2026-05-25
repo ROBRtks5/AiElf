@@ -2,6 +2,10 @@ package com.example
 
 import android.Manifest
 import android.content.Intent
+import android.os.PowerManager
+import android.provider.Settings as AndroidSettings
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
@@ -15,8 +19,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,6 +61,21 @@ class MainActivity : ComponentActivity() {
         startActivity(intent)
         android.os.Process.killProcess(android.os.Process.myPid())
         System.exit(1)
+    }
+    
+    // Блокировка экрана на Xiaomi/Android 14+ и оптимизация батареи
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                val intent = Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Игнорируем если активности нет
+            }
+        }
     }
     
     // Менеджмент питания: не даем экрану погаснуть 
@@ -111,7 +130,7 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
   val proactiveTimer = remember { ProactiveChatTimer() }
 
   val userProfile by profileManager.userProfileFlow.collectAsState(
-      initial = UserProfile("", "", "", "", "", "")
+      initial = UserProfile("", "", "", "", "", "", "", "")
   )
   
   val startEngine = {
@@ -139,6 +158,7 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
               val vm = VoiceManager(context) { success ->
                   if (!success) statusText = "Ошибка инициализации TTS"
               }
+              vm.updateApiKeys(userProfile.elevenLabsApiKey)
               voiceManager = vm
               val bm = StoryBufferManager(vm)
               bufferManager = bm
@@ -187,7 +207,7 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                           proactiveTimer.resetTimer()
                       }
                   },
-                  onRmsChanged = { rms ->
+                  onRmsLevelChanged = { rms ->
                       if (speakerState == SpeakerState.LISTENING) {
                           currentRms = rms
                           proactiveTimer.resetTimer()
@@ -215,6 +235,10 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
               engineState = 0
           }
       }
+  }
+
+  LaunchedEffect(userProfile.elevenLabsApiKey) {
+      voiceManager?.updateApiKeys(userProfile.elevenLabsApiKey)
   }
 
   // Запуск проактивного диалога
@@ -286,7 +310,8 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
           ) {
               OrbAnimation(
                   state = speakerState,
-                  rms = currentRms
+                  rms = currentRms,
+                  geminiApiKey = userProfile.geminiApiKey
               )
               
               Text(
@@ -321,7 +346,7 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
                                   }
                               }
                           }) {
-                              Icon(Icons.Default.Send, "Отправить", tint = Color.White)
+                              Icon(Icons.AutoMirrored.Filled.Send, "Отправить", tint = Color.White)
                           }
                       },
                       colors = OutlinedTextFieldDefaults.colors(
@@ -334,7 +359,7 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
       } else {
           // Экран до старта (ожидаем клика для активации движка)
           Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              OrbAnimation(state = SpeakerState.IDLE, rms = 0f)
+              OrbAnimation(state = SpeakerState.IDLE, rms = 0f, geminiApiKey = userProfile.geminiApiKey)
               Text(
                 text = "Сплю. Нажми в любое место, чтобы разбудить.",
                 color = Color.White.copy(alpha = 0.7f),
@@ -358,8 +383,9 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
 }
 
 @Composable
-fun OrbAnimation(state: SpeakerState, rms: Float) {
-    val apiKeyMissing = com.example.BuildConfig.GEMINI_API_KEY.isEmpty() || com.example.BuildConfig.GEMINI_API_KEY == "MY_GEMINI_API_KEY"
+fun OrbAnimation(state: SpeakerState, rms: Float, geminiApiKey: String) {
+    val currentKey = geminiApiKey.ifBlank { com.example.BuildConfig.GEMINI_API_KEY }
+    val apiKeyMissing = currentKey.isEmpty() || currentKey == "MY_GEMINI_API_KEY"
     val infiniteTransition = rememberInfiniteTransition(label = "OrbTransition")
     
     val idleScale by infiniteTransition.animateFloat(

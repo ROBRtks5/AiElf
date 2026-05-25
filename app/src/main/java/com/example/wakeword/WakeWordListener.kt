@@ -14,7 +14,7 @@ class WakeWordListener(
     private val onWakeWordDetected: () -> Unit,
     private val onCommandDetected: (String) -> Unit,
     private val onStateChanged: (SpeakerState) -> Unit,
-    private val onRmsChanged: (Float) -> Unit
+    private val onRmsLevelChanged: (Float) -> Unit
 ) {
     private var speechRecognizer: SpeechRecognizer? = null
     private var isListening = false
@@ -34,7 +34,7 @@ class WakeWordListener(
                     override fun onBeginningOfSpeech() {}
                     
                     override fun onRmsChanged(rmsdB: Float) {
-                        this@WakeWordListener.onRmsChanged(rmsdB)
+                        onRmsLevelChanged(rmsdB)
                     }
                     
                     override fun onBufferReceived(buffer: ByteArray?) {}
@@ -52,8 +52,15 @@ class WakeWordListener(
                         Log.e("WakeWordListener", "Ошибка: ${getErrorMessage(error)}, перезапускаем прослушивание")
                         isListening = false
                         isCommandMode = false
-                        // Запускаем переподключение только если приложение активно и с небольшой задержкой
-                        startListening()
+                        
+                        if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                            return
+                        }
+                        
+                        // Запускаем переподключение с небольшой задержкой, чтобы избежать ANR
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            startListening()
+                        }, 1000)
                     }
 
                     override fun onResults(results: Bundle?) {
@@ -78,7 +85,9 @@ class WakeWordListener(
                                     // Переходим в режим слушания команды
                                     isCommandMode = true
                                     isListening = false
-                                    startListening()
+                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                        startListening()
+                                    }, 100)
                                     return
                                 }
                             }
@@ -87,7 +96,9 @@ class WakeWordListener(
                         if (!isCommandMode) {
                             isListening = false
                             onStateChanged(SpeakerState.IDLE)
-                            startListening() 
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                startListening()
+                            }, 500)
                         }
                     }
 

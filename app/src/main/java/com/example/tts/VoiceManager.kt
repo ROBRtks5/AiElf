@@ -46,8 +46,12 @@ class VoiceManager(private val context: Context, private val onInitCompleted: (B
     private var playbackJob: Job? = null
     
     // Вставь свой ключ сюда
-    private val ELEVEN_LABS_API_KEY = "" 
+    private var elevenLabsApiKeyVar = "" 
     private val VOICE_ID = "EXAVITQu4vr4xnSDxMaL" // Sarah или Bella
+
+    fun updateApiKeys(newKey: String) {
+        elevenLabsApiKeyVar = newKey
+    }
     
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     
@@ -109,7 +113,7 @@ class VoiceManager(private val context: Context, private val onInitCompleted: (B
             stop()
         }
         
-        if (ELEVEN_LABS_API_KEY.isNotBlank() && ELEVEN_LABS_API_KEY != "YOUR_KEY_HERE") {
+        if (elevenLabsApiKeyVar.isNotBlank() && elevenLabsApiKeyVar != "YOUR_KEY_HERE") {
             // Отправляем в очередь ElevenLabs
             queue.trySend(text)
         } else {
@@ -120,7 +124,7 @@ class VoiceManager(private val context: Context, private val onInitCompleted: (B
     private suspend fun playChunk(text: String) {
         try {
             val request = ElevenLabsRequest(text = text)
-            val response = elevenLabsApi.textToSpeechStream(VOICE_ID, ELEVEN_LABS_API_KEY, request)
+            val response = elevenLabsApi.textToSpeechStream(VOICE_ID, elevenLabsApiKeyVar, request)
             val tempFile = File.createTempFile("voice", ".mp3", context.cacheDir)
             
             response.byteStream().use { input ->

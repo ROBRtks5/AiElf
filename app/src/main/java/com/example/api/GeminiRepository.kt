@@ -47,7 +47,8 @@ class GeminiRepository {
     private val chatHistory = mutableListOf<Content>()
 
     fun generateStoryStream(prompt: String, profile: UserProfile): Flow<String> = flow {
-        if (BuildConfig.GEMINI_API_KEY.isEmpty() || BuildConfig.GEMINI_API_KEY == "MY_GEMINI_API_KEY") {
+        val apiKey = profile.geminiApiKey.ifBlank { BuildConfig.GEMINI_API_KEY }
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
             emit("Братишка, ты забыл вставить мой API-ключ в настройки.")
             return@flow
         }
@@ -96,7 +97,7 @@ class GeminiRepository {
         val fullResponseBuffer = java.lang.StringBuilder()
 
         try {
-            val response = api.generateContentStream(BuildConfig.GEMINI_API_KEY, requestParams)
+            val response = api.generateContentStream(apiKey, requestParams)
             response.byteStream().bufferedReader().use { reader ->
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
