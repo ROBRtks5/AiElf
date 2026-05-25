@@ -21,91 +21,97 @@ class WakeWordListener(
     private var isCommandMode = false
     private val wakeWord = "эй малышка"
 
-    fun startListening() {
-        if (isListening) return
+    fun startListening(): Boolean {
+        if (isListening) return true
         
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    onStateChanged(SpeakerState.LISTENING)
-                }
-                
-                override fun onBeginningOfSpeech() {}
-                
-                override fun onRmsChanged(rmsdB: Float) {
-                    onRmsChanged(rmsdB)
-                }
-                
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                
-                override fun onEndOfSpeech() {
-                    // Пользователь закончил говорить
-                    if (isCommandMode) {
-                        onStateChanged(SpeakerState.THINKING)
-                    } else {
-                        onStateChanged(SpeakerState.IDLE)
+        try {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        onStateChanged(SpeakerState.LISTENING)
                     }
-                }
-                
-                override fun onError(error: Int) {
-                    Log.e("WakeWordListener", "Ошибка: ${getErrorMessage(error)}, перезапускаем прослушивание")
-                    isListening = false
-                    isCommandMode = false
-                    startListening()
-                }
-
-                override fun onResults(results: Bundle?) {
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val bestMatch = matches?.firstOrNull()?.lowercase(Locale.getDefault()) ?: ""
-                    Log.d("WakeWordListener", "Услышано: $bestMatch")
                     
-                    if (isCommandMode) {
-                        // Мы в режиме приема основной команды
-                        if (bestMatch.isNotBlank()) {
-                            onCommandDetected(bestMatch)
+                    override fun onBeginningOfSpeech() {}
+                    
+                    override fun onRmsChanged(rmsdB: Float) {
+                        this@WakeWordListener.onRmsChanged(rmsdB)
+                    }
+                    
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    
+                    override fun onEndOfSpeech() {
+                        // Пользователь закончил говорить
+                        if (isCommandMode) {
+                            onStateChanged(SpeakerState.THINKING)
+                        } else {
+                            onStateChanged(SpeakerState.IDLE)
                         }
+                    }
+                    
+                    override fun onError(error: Int) {
+                        Log.e("WakeWordListener", "Ошибка: ${getErrorMessage(error)}, перезапускаем прослушивание")
+                        isListening = false
                         isCommandMode = false
-                    } else {
-                        // Ожидаем фразу активации
-                        if (bestMatch.contains(wakeWord)) {
-                            onWakeWordDetected()
-                            val command = bestMatch.substringAfter(wakeWord).trim()
-                            if (command.isNotEmpty()) {
-                                onCommandDetected(command)
-                            } else {
-                                // Переходим в режим слушания команды
-                                isCommandMode = true
-                                isListening = false
-                                startListening()
-                                return
+                        // Запускаем переподключение только если приложение активно и с небольшой задержкой
+                        startListening()
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val bestMatch = matches?.firstOrNull()?.lowercase(Locale.getDefault()) ?: ""
+                        Log.d("WakeWordListener", "Услышано: $bestMatch")
+                        
+                        if (isCommandMode) {
+                            // Мы в режиме приема основной команды
+                            if (bestMatch.isNotBlank()) {
+                                onCommandDetected(bestMatch)
+                            }
+                            isCommandMode = false
+                        } else {
+                            // Ожидаем фразу активации
+                            if (bestMatch.contains(wakeWord)) {
+                                onWakeWordDetected()
+                                val command = bestMatch.substringAfter(wakeWord).trim()
+                                if (command.isNotEmpty()) {
+                                    onCommandDetected(command)
+                                } else {
+                                    // Переходим в режим слушания команды
+                                    isCommandMode = true
+                                    isListening = false
+                                    startListening()
+                                    return
+                                }
                             }
                         }
+                        
+                        if (!isCommandMode) {
+                            isListening = false
+                            onStateChanged(SpeakerState.IDLE)
+                            startListening() 
+                        }
                     }
-                    
-                    if (!isCommandMode) {
-                        isListening = false
-                        onStateChanged(SpeakerState.IDLE)
-                        startListening() 
-                    }
-                }
 
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
+                    override fun onPartialResults(partialResults: Bundle?) {}
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+            }
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            }
+
+            speechRecognizer?.startListening(intent)
+            isListening = true
+            return true
+        } catch (e: Exception) {
+            Log.e("WakeWord", "Ошибка запуска SpeechRecognizer. Возможно эмулятор без микрофона. ${e.message}")
+            isListening = false
+            return false
         }
-
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            // Блок 1: Тишина.
-            // Автоматическое определение завершения речи на основе длинных пауз.
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-        }
-
-        speechRecognizer?.startListening(intent)
-        isListening = true
     }
 
     fun stopListening() {

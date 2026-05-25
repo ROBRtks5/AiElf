@@ -1,8 +1,10 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -14,12 +16,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,12 +42,24 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     
-    // Менеджмент питания: не даем экрану погаснуть (Блок 1) 
+    // БЛОК 1: Глобальный отлов ошибок
+    Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
+        val intent = Intent(this, CrashActivity::class.java).apply {
+            putExtra("crash_error", throwable.stackTraceToString())
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
+        startActivity(intent)
+        android.os.Process.killProcess(android.os.Process.myPid())
+        System.exit(1)
+    }
+    
+    // Менеджмент питания: не даем экрану погаснуть 
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     
     enableEdgeToEdge()
@@ -85,101 +95,154 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
   val scope = rememberCoroutineScope()
   val micPermissionState = rememberPermissionState(permission = Manifest.permission.RECORD_AUDIO)
   
-  var statusText by remember { mutableStateOf("Загрузка...") }
+  var statusText by remember { mutableStateOf("Спящий режим. Нажмите на сферу для активации.") }
   var speakerState by remember { mutableStateOf(SpeakerState.IDLE) }
   var currentRms by remember { mutableStateOf(0f) }
-
-  val repository = remember { GeminiRepository() }
   
+  var engineState by remember { mutableStateOf(0) } // 0 = Спит, 1 = Инициализация, 2 = Готов
+  var isMicWorking by remember { mutableStateOf(true) }
+  var textInput by remember { mutableStateOf("") }
+
+  // Эти объекты мы создадим ТОЛЬКО когда нажмут старт
+  var repository by remember { mutableStateOf<GeminiRepository?>(null) }
+  var voiceManager by remember { mutableStateOf<VoiceManager?>(null) }
+  var bufferManager by remember { mutableStateOf<StoryBufferManager?>(null) }
+  var wakeWordListener by remember { mutableStateOf<WakeWordListener?>(null) }
+  val proactiveTimer = remember { ProactiveChatTimer() }
+
   val userProfile by profileManager.userProfileFlow.collectAsState(
       initial = UserProfile("", "", "", "", "", "")
   )
   
-  val voiceManager = remember {
-      VoiceManager(context) { success ->
-          if (success) {
-              statusText = "Голос готов. Скажите «эй малышка»"
-          } else {
-              statusText = "Ошибка инициализации голоса"
-          }
+  val startEngine = {
+      if (engineState == 0) {
+          engineState = 1
       }
   }
-  
-  val bufferManager = remember(voiceManager) { StoryBufferManager(voiceManager) }
-  val proactiveTimer = remember { ProactiveChatTimer() }
 
-  val wakeWordListener = remember(userProfile.name) { // Пересоздаем если обновился профиль, чтобы контекст был свежим
-      WakeWordListener(
-          context = context,
-          onWakeWordDetected = {
-              scope.launch {
-                  proactiveTimer.stopTimer()
-                  bufferManager.stop()
-                  speakerState = SpeakerState.SPEAKING
-                  voiceManager.speak("Слушаю, ${userProfile.name}", flush = true)
-                  statusText = "Активирована! Слушаю..."
+  // Запуск системы (Асинхронно, чтобы не блокировать Main Thread)
+  LaunchedEffect(engineState) {
+      if (engineState == 1) {
+          try {
+              statusText = "Инициализация подсистем..."
+              speakerState = SpeakerState.THINKING
+              
+              // Имитируем загрузку для плавности UI, даем отрисоваться
+              delay(1000)
+
+              // Создание репозиториев в IO-потоке
+              val repo = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                  GeminiRepository()
               }
-          },
-          onCommandDetected = { command ->
-              proactiveTimer.stopTimer() // Пока идет команда или генерация - сбрасываем таймер
-              if (command.contains("стоп") || command.contains("хватит") || command.contains("молчи")) {
-                  bufferManager.stop()
-                  speakerState = SpeakerState.IDLE
-                  statusText = "Остановлено"
-                  voiceManager.speak("Хорошо, молчу.", flush = true)
-                  proactiveTimer.resetTimer()
+              repository = repo
+
+              val vm = VoiceManager(context) { success ->
+                  if (!success) statusText = "Ошибка инициализации TTS"
+              }
+              voiceManager = vm
+              val bm = StoryBufferManager(vm)
+              bufferManager = bm
+              
+              val wwl = WakeWordListener(
+                  context = context,
+                  onWakeWordDetected = {
+                      scope.launch {
+                          proactiveTimer.stopTimer()
+                          bm.stop()
+                          speakerState = SpeakerState.SPEAKING
+                          vm.speak("Слушаю, ${userProfile.name}", flush = true)
+                          statusText = "Активирована! Слушаю..."
+                      }
+                  },
+                  onCommandDetected = { command ->
+                      scope.launch {
+                          try {
+                              proactiveTimer.stopTimer()
+                              if (command.contains("стоп") || command.contains("хватит") || command.contains("молчи")) {
+                                  bm.stop()
+                                  speakerState = SpeakerState.IDLE
+                                  statusText = "Остановлено"
+                                  vm.speak("Хорошо, молчу.", flush = true)
+                                  proactiveTimer.resetTimer()
+                              } else {
+                                  speakerState = SpeakerState.THINKING
+                                  statusText = "Генерирую ответ: $command"
+                                  val flow = repo.generateStoryStream(command, userProfile)
+                                  bm.processStream(flow)
+                                  speakerState = SpeakerState.SPEAKING
+                                  proactiveTimer.resetTimer()
+                              }
+                          } catch(e: Exception) {
+                              statusText = "Ошибка: ${e.message}"
+                              speakerState = SpeakerState.ERROR
+                              proactiveTimer.resetTimer()
+                          }
+                      }
+                  },
+                  onStateChanged = { state -> 
+                      if (speakerState != SpeakerState.SPEAKING || (speakerState == SpeakerState.SPEAKING && state == SpeakerState.IDLE)) {
+                         speakerState = state 
+                      }
+                      if (state == SpeakerState.IDLE) {
+                          proactiveTimer.resetTimer()
+                      }
+                  },
+                  onRmsChanged = { rms ->
+                      if (speakerState == SpeakerState.LISTENING) {
+                          currentRms = rms
+                          proactiveTimer.resetTimer()
+                      }
+                  }
+              )
+              wakeWordListener = wwl
+              
+              // Запуск слушателя
+              delay(500)
+              val started = wwl.startListening()
+              if (!started) {
+                  isMicWorking = false
+                  Toast.makeText(context, "Внимание: Микрофон недоступен. Режим чата.", Toast.LENGTH_LONG).show()
+                  statusText = "Микрофон недоступен. Напишите текст."
               } else {
-                  speakerState = SpeakerState.THINKING
-                  statusText = "Генерирую ответ: $command"
-                  val flow = repository.generateStoryStream(command, userProfile)
-                  bufferManager.processStream(flow)
-                  speakerState = SpeakerState.SPEAKING
+                  statusText = "Анализ звука запущен. Скажите «Эй малышка»"
                   proactiveTimer.resetTimer()
               }
-          },
-          onStateChanged = { state -> 
-              if (speakerState != SpeakerState.SPEAKING || (speakerState == SpeakerState.SPEAKING && state == SpeakerState.IDLE)) {
-                 speakerState = state 
-              }
-              if (state == SpeakerState.IDLE) {
-                  proactiveTimer.resetTimer() // Запускаем таймер проактивности, когда молчим
-              }
-          },
-          onRmsChanged = { rms ->
-              if (speakerState == SpeakerState.LISTENING) {
-                  currentRms = rms
-                  // Любой шум тоже сбрасывает таймер, значит пользователь тут
-                  proactiveTimer.resetTimer()
-              }
+              speakerState = SpeakerState.IDLE
+              engineState = 2
+          } catch(e: Exception) {
+              statusText = "Ошибка при запуске: ${e.message}"
+              speakerState = SpeakerState.ERROR
+              engineState = 0
           }
-      )
+      }
   }
 
   // Запуск проактивного диалога
-  LaunchedEffect(Unit) {
-      proactiveTimer.proactiveTrigger.collectLatest {
-          val prompt = "[SYSTEM_EVENT: Пользователь молчит уже 3 минуты. Инициируй короткий диалог сама. " +
-                       "Спроси как дела, пошути, предложи обсудить трейдинг или велосипеды, или просто мило помурлыкай]"
-          speakerState = SpeakerState.THINKING
-          statusText = "Проявляю инициативу..."
-          val flow = repository.generateStoryStream(prompt, userProfile)
-          bufferManager.processStream(flow)
-          speakerState = SpeakerState.SPEAKING
-          proactiveTimer.resetTimer()
-      }
-  }
-
-  LaunchedEffect(micPermissionState.status.isGranted) {
-      if (micPermissionState.status.isGranted) {
-          wakeWordListener.startListening()
-          proactiveTimer.resetTimer()
+  LaunchedEffect(engineState) {
+      if (engineState == 2) {
+          proactiveTimer.proactiveTrigger.collectLatest {
+              try {
+                  val prompt = "[SYSTEM_EVENT: Пользователь молчит уже 3 минуты. Инициируй короткий диалог сама. " +
+                               "Спроси как дела, пошути, предложи обсудить трейдинг или велосипеды, или просто мило помурлыкай]"
+                  speakerState = SpeakerState.THINKING
+                  statusText = "Проявляю инициативу..."
+                  val flow = repository?.generateStoryStream(prompt, userProfile)
+                  if (flow != null) {
+                      bufferManager?.processStream(flow)
+                  }
+                  speakerState = SpeakerState.SPEAKING
+                  proactiveTimer.resetTimer()
+              } catch (e: Exception) {
+                  statusText = "Сбой проактивности: ${e.message}"
+              }
+          }
       }
   }
 
   DisposableEffect(Unit) {
       onDispose {
-          wakeWordListener.stopListening()
-          bufferManager.stop()
+          wakeWordListener?.stopListening()
+          bufferManager?.stop()
           proactiveTimer.stopTimer()
       }
   }
@@ -187,54 +250,107 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
   Box(
     modifier = modifier
       .fillMaxSize()
-      .background(Color.Black) // Тёмная тема AOD
+      .background(Color.Black)
       .clickable {
-         bufferManager.stop()
-         speakerState = SpeakerState.IDLE
-         statusText = "Принудительная остановка (клик)"
+         if (engineState > 0) {
+             bufferManager?.stop()
+             speakerState = SpeakerState.IDLE
+             statusText = "Принудительная остановка (клик)"
+         } else {
+             // Клик по экрану может запустить движок, если есть пермиссии
+             if (micPermissionState.status.isGranted) {
+                 startEngine()
+             }
+         }
       },
     contentAlignment = Alignment.Center
   ) {
     if (micPermissionState.status.isGranted) {
-      IconButton(
-         onClick = onSettingsClick,
-         modifier = Modifier
-             .align(Alignment.TopEnd)
-             .padding(16.dp)
-      ) {
-         Icon(
-            imageVector = Icons.Default.Settings,
-            contentDescription = "Настройки Профиля",
-            tint = Color.White.copy(alpha = 0.6f)
-         )
-      }
-      Column(
-          horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.Center
-      ) {
-          // Блок 3: UI Анимация живой материи
-          OrbAnimation(
-              state = speakerState,
-              rms = currentRms
-          )
-          
-          Text(
-            text = statusText,
-            color = Color.White,
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 32.dp)
-          )
+      if (engineState > 0) {
+          IconButton(
+             onClick = onSettingsClick,
+             modifier = Modifier
+                 .align(Alignment.TopEnd)
+                 .padding(16.dp)
+          ) {
+             Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Настройки Профиля",
+                tint = Color.White.copy(alpha = 0.6f)
+             )
+          }
+          Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.Center,
+              modifier = Modifier.fillMaxWidth().padding(16.dp)
+          ) {
+              OrbAnimation(
+                  state = speakerState,
+                  rms = currentRms
+              )
+              
+              Text(
+                text = statusText,
+                color = Color.White,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 32.dp)
+              )
+              
+              if (!isMicWorking) {
+                  OutlinedTextField(
+                      value = textInput,
+                      onValueChange = { textInput = it },
+                      placeholder = { Text("Введите команду...") },
+                      modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                      trailingIcon = {
+                          IconButton(onClick = {
+                              if (textInput.isNotBlank()) {
+                                  scope.launch {
+                                      try {
+                                          speakerState = SpeakerState.THINKING
+                                          statusText = "Запрос: $textInput"
+                                          val flow = repository?.generateStoryStream(textInput, userProfile)
+                                          if (flow != null) bufferManager?.processStream(flow)
+                                          speakerState = SpeakerState.SPEAKING
+                                          textInput = ""
+                                      } catch(e: Exception) {
+                                          statusText = "Ошибка: ${e.message}"
+                                          speakerState = SpeakerState.ERROR
+                                      }
+                                  }
+                              }
+                          }) {
+                              Icon(Icons.Default.Send, "Отправить", tint = Color.White)
+                          }
+                      },
+                      colors = OutlinedTextFieldDefaults.colors(
+                          focusedTextColor = Color.White,
+                          unfocusedTextColor = Color.White,
+                      )
+                  )
+              }
+          }
+      } else {
+          // Экран до старта (ожидаем клика для активации движка)
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              OrbAnimation(state = SpeakerState.IDLE, rms = 0f)
+              Text(
+                text = "Сплю. Нажми в любое место, чтобы разбудить.",
+                color = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.padding(top = 24.dp)
+              )
+          }
       }
     } else {
       Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-          text = "Need Microphone Permission for Voice Commands.",
+          text = "Требуется доступ к микрофону для разговора.",
           color = Color.White,
           modifier = Modifier.padding(bottom = 16.dp)
         )
         Button(onClick = { micPermissionState.launchPermissionRequest() }) {
-          Text("Grant Permission")
+          Text("Выдать разрешение")
         }
       }
     }
@@ -246,7 +362,6 @@ fun OrbAnimation(state: SpeakerState, rms: Float) {
     val apiKeyMissing = com.example.BuildConfig.GEMINI_API_KEY.isEmpty() || com.example.BuildConfig.GEMINI_API_KEY == "MY_GEMINI_API_KEY"
     val infiniteTransition = rememberInfiniteTransition(label = "OrbTransition")
     
-    // Плавное дыхание (Idle)
     val idleScale by infiniteTransition.animateFloat(
         initialValue = 1f,
         targetValue = 1.1f,
@@ -256,7 +371,6 @@ fun OrbAnimation(state: SpeakerState, rms: Float) {
         ), label = "IdleScale"
     )
     
-    // Вращение (Thinking)
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -266,7 +380,6 @@ fun OrbAnimation(state: SpeakerState, rms: Float) {
         ), label = "ThinkingRotation"
     )
 
-    // Аудио пульсация (Listening, Speaking)
     val animatedRms by animateFloatAsState(
         targetValue = maxOf(0f, rms),
         animationSpec = tween(durationMillis = 100),
@@ -277,16 +390,16 @@ fun OrbAnimation(state: SpeakerState, rms: Float) {
         SpeakerState.IDLE -> idleScale
         SpeakerState.ERROR -> idleScale
         SpeakerState.THINKING -> 1.0f
-        SpeakerState.LISTENING -> 1f + (animatedRms / 15f) // RMS обычно от 0 до 10-15
-        SpeakerState.SPEAKING -> 1f + (idleScale * 0.2f) // Простая стимуляция речи
+        SpeakerState.LISTENING -> 1f + (animatedRms / 15f)
+        SpeakerState.SPEAKING -> 1f + (idleScale * 0.2f)
     }
     
     val color = when(state) {
-        SpeakerState.IDLE -> if (apiKeyMissing) Color.Red else Color(0xFF607D8B) // Серо-синий или красный при ошибке
-        SpeakerState.ERROR -> Color.Red // Красный при ошибке ключа
-        SpeakerState.LISTENING -> Color(0xFFE91E63) // Розовый эльфийский
-        SpeakerState.THINKING -> Color(0xFF2196F3) // Голубой
-        SpeakerState.SPEAKING -> Color(0xFF9C27B0) // Фиолетовый
+        SpeakerState.IDLE -> if (apiKeyMissing) Color.Red else Color(0xFF607D8B)
+        SpeakerState.ERROR -> Color.Red
+        SpeakerState.LISTENING -> Color(0xFFE91E63)
+        SpeakerState.THINKING -> Color(0xFF2196F3)
+        SpeakerState.SPEAKING -> Color(0xFF9C27B0)
     }
 
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(200.dp)) {
@@ -294,16 +407,13 @@ fun OrbAnimation(state: SpeakerState, rms: Float) {
             val center = this.center
             val radius = 150f * baseScale
             
-            // Внутренний шар (сплошной)
             drawCircle(
                 color = color.copy(alpha = 0.8f),
                 radius = radius,
                 center = center
             )
             
-            // Внешнее кольцо (или волны)
             if (state == SpeakerState.THINKING) {
-                // Вращающиеся дуги
                 drawArc(
                     color = color,
                     startAngle = rotation,
@@ -323,7 +433,6 @@ fun OrbAnimation(state: SpeakerState, rms: Float) {
                     topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 1.25f, center.y - radius * 1.25f)
                 )
             } else {
-                // Внешнее свечение/волны 
                 val outerRadius = radius * 1.3f
                 drawCircle(
                     color = color.copy(alpha = 0.3f),

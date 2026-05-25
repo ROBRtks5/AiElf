@@ -5,6 +5,9 @@ import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import com.squareup.moshi.JsonClass
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import okhttp3.ResponseBody
@@ -13,9 +16,16 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.Retrofit
+import retrofit2.converter.moshi.MoshiConverterFactory
 import java.io.File
-import java.util.Locale
 import java.io.FileOutputStream
+import java.util.Locale
+
+@JsonClass(generateAdapter = true)
+data class ElevenLabsRequest(
+    val text: String,
+    val model_id: String = "eleven_multilingual_v2"
+)
 
 // API Клиент для ElevenLabs
 interface ElevenLabsApiService {
@@ -23,7 +33,7 @@ interface ElevenLabsApiService {
     suspend fun textToSpeechStream(
         @Path("voice_id") voiceId: String,
         @Header("xi-api-key") apiKey: String,
-        @Body request: Map<String, Any>
+        @Body request: ElevenLabsRequest
     ): ResponseBody
 }
 
@@ -39,9 +49,12 @@ class VoiceManager(private val context: Context, private val onInitCompleted: (B
     private val ELEVEN_LABS_API_KEY = "" 
     private val VOICE_ID = "EXAVITQu4vr4xnSDxMaL" // Sarah или Bella
     
+    private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+    
     private val elevenLabsApi: ElevenLabsApiService by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.elevenlabs.io/")
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(ElevenLabsApiService::class.java)
     }
@@ -106,10 +119,7 @@ class VoiceManager(private val context: Context, private val onInitCompleted: (B
 
     private suspend fun playChunk(text: String) {
         try {
-            val request = mapOf(
-                "text" to text,
-                "model_id" to "eleven_multilingual_v2"
-            )
+            val request = ElevenLabsRequest(text = text)
             val response = elevenLabsApi.textToSpeechStream(VOICE_ID, ELEVEN_LABS_API_KEY, request)
             val tempFile = File.createTempFile("voice", ".mp3", context.cacheDir)
             
