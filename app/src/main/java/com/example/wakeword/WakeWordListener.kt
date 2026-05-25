@@ -37,34 +37,18 @@ class WakeWordListener(
     }
 
     fun startListening(): Boolean {
-        // Всегда уничтожаем предыдущий SpeechRecognizer перед запуском нового во избежание зависаний и утечек ресурсов
         destroyRecognizer()
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             Log.e("WakeWordListener", "SpeechRecognizer не поддерживается на этом устройстве")
-            onDebugText?.invoke("Голосовой ввод недоступен на устройстве")
+            onDebugText?.invoke("Голосовой ввод недоступен")
             return false
         }
 
         try {
-            // Ищем Google Speech Recognition сервис (приоритет для оффлайн пакетов)
-            val googleComponent = android.content.ComponentName(
-                "com.google.android.googlequicksearchbox",
-                "com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
-            )
-            
-            // Проверяем, существует ли этот сервис в системе
-            val serviceIntent = Intent(RecognitionService.SERVICE_INTERFACE)
-            serviceIntent.component = googleComponent
-            val resolveInfo = context.packageManager.resolveService(serviceIntent, 0)
-            
-            speechRecognizer = if (resolveInfo != null) {
-                Log.d("WakeWordListener", "Используем Google Speech Recognizer напрямую")
-                SpeechRecognizer.createSpeechRecognizer(context.applicationContext, googleComponent)
-            } else {
-                Log.w("WakeWordListener", "Google Speech Recognizer не найден, используем системный")
-                SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
-            }
+            // Используем стандартный системный инициализатор без принудительной привязки к конкретным Google-сервисам,
+            // чтобы на прошивках Xiaomi/Sber/Yandex Android корректно выбирался работающий встроенный Speech Engine.
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
             
             speechRecognizer?.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
@@ -89,20 +73,30 @@ class WakeWordListener(
 
                 override fun onError(error: Int) {
                     val msg = getErrorMessage(error)
-                    Log.e("WakeWordListener", "Код ошибки: $error - $msg")
-                    onDebugText?.invoke("Ошибка микрофона: $msg")
+                    Log.d("WakeWordListener", "Код ошибки: $error - $msg")
                     
                     isListening = false
                     isCommandMode = false
 
                     if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                        onDebugText?.invoke("Ошибка: Нет разрешения к микрофону")
                         return
                     }
 
-                    // Перезапускаем слушатель через 1.5 секунды, давая системе освободить аудио-ресурсы
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        startListening()
-                    }, 1500)
+                    // Таймаут тишины (6) или отсутствие речи (7) — абсолютно штатное поведение во время фонового прослушивания.
+                    // Никогда не пугаем пользователя пустяковыми логами «Ошибка микрофона» в инфо-панели.
+                    if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        onDebugText?.invoke("Микрофон: $msg")
+                        val delay = if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 2500L else 1500L
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            startListening()
+                        }, delay)
+                    } else {
+                        // Бесшумный мягкий перезапуск после молчания
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            startListening()
+                        }, 300)
+                    }
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -142,7 +136,6 @@ class WakeWordListener(
 
                     isListening = false
 
-                    // Мягкий перезапуск для непрерывного приема голоса
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                         startListening()
                     }, 500)
@@ -165,10 +158,10 @@ class WakeWordListener(
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU")
                 putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, "ru-RU")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                // Обязательно указываем использовать оффлайн-модель, если она скачана
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                }
+                
+                // EXTRA_CALLING_PACKAGE является обязательным на многих версиях Android для внутренних приложений
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+                
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
             }

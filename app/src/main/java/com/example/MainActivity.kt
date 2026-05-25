@@ -286,18 +286,17 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
     modifier = modifier
       .fillMaxSize()
       .background(Color.Black)
-      .clickable {
-         if (engineState > 0) {
-             bufferManager?.stop()
-             speakerState = SpeakerState.IDLE
-             statusText = "Принудительная остановка (клик)"
-         } else {
-             // Клик по экрану может запустить движок, если есть пермиссии
-             if (micPermissionState.status.isGranted) {
-                 startEngine()
-             }
-         }
-      },
+      .then(
+          if (engineState == 0) {
+              Modifier.clickable {
+                  if (micPermissionState.status.isGranted) {
+                      startEngine()
+                  }
+              }
+          } else {
+              Modifier
+          }
+      ),
     contentAlignment = Alignment.Center
   ) {
     if (micPermissionState.status.isGranted) {
@@ -319,11 +318,23 @@ fun SmartSpeakerApp(modifier: Modifier = Modifier, profileManager: ProfileManage
               verticalArrangement = Arrangement.Center,
               modifier = Modifier.fillMaxWidth().padding(16.dp)
           ) {
-              OrbAnimation(
-                  state = speakerState,
-                  rms = currentRms,
-                  geminiApiKey = userProfile.geminiApiKey
-              )
+              Box(
+                  modifier = Modifier
+                      .clip(CircleShape)
+                      .clickable {
+                          if (engineState > 0) {
+                              bufferManager?.stop()
+                              speakerState = SpeakerState.IDLE
+                              statusText = "Принудительная остановка"
+                          }
+                      }
+              ) {
+                  OrbAnimation(
+                      state = speakerState,
+                      rms = currentRms,
+                      geminiApiKey = userProfile.geminiApiKey
+                  )
+              }
               
               Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 32.dp), contentAlignment = Alignment.Center) {
                   Text(
